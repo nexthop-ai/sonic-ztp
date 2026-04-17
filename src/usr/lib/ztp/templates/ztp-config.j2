@@ -8,6 +8,39 @@
        "hostname" : "sonic"
       }
     },
+<<<<<<< HEAD
+=======
+{% if ZTP_INBAND == "true" %}
+    "COPP_TRAP": {
+      "inband_dhcp": {
+        "trap_ids": "dhcp,dhcpv6,dhcp_l2,dhcpv6_l2",
+        "trap_group": "queue4_group3",
+        "always_enabled": "true"
+      }
+    },
+    "COPP_GROUP": {
+            "queue4_group3": {
+                    "trap_action":"trap",
+                    "trap_priority":"4",
+                    "queue": "4",
+                    "meter_type":"packets",
+                    "mode":"sr_tcm",
+                    "cir":"300",
+                    "cbs":"300",
+                    "red_action":"drop"
+            }
+    },
+{% endif %}
+{% if ZTP_INBAND == "true" and ZTP_IPV6 == "true" %}
+    "INTERFACE": {
+{%- for port in PORT %}
+         "{{port}}" : {
+                "ipv6_use_link_local_only": "enable"
+         }{%- if loop.last == False -%},{% endif %}
+{%- endfor %}
+   },
+{% endif %}
+>>>>>>> d77e888 (NOS-4061: Add dhcp/dhcpv6 traps alongside dhcp_l2/dhcpv6_l2 for ZTP (#83))
     "PORT": {
 {%- for port in PORT -%}
          "{{port}}" : {
