@@ -16,6 +16,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 '''
 
+import ipaddress
 import sys
 import time
 import os
@@ -23,6 +24,45 @@ import os
 from ztp.ZTPLib import isString, runCommand, getField, updateActivity
 from ztp.ZTPSections import ConfigSection
 from ztp.Logger import logger
+
+
+def _hostFamily(host):
+    '''!
+    Return 4, 6, or None (hostname / unparseable) for @host.
+    '''
+    try:
+        return ipaddress.ip_address(host).version
+    except (ValueError, TypeError):
+        return None
+
+
+def _logHostGroups(stage, hosts):
+    '''!
+    Log @hosts grouped by address family with the right label.
+    @stage is one of "attempt" or "reachable". Non-string entries are
+    dropped (matching pingHosts' behavior).
+    '''
+    if not isinstance(hosts, list):
+        hosts = [hosts]
+    ipv4, ipv6, names = [], [], []
+    for h in hosts:
+        if not isString(h):
+            continue
+        version = _hostFamily(h)
+        if version == 4:
+            ipv4.append(h)
+        elif version == 6:
+            ipv6.append(h)
+        else:
+            names.append(h)
+    for label, group in (('IPv4', ipv4), ('IPv6', ipv6), ('', names)):
+        if not group:
+            continue
+        prefix = (label + ' ') if label else ''
+        if stage == 'attempt':
+            logger.info("connectivity-check: Attempting to connect to %shosts %s." % (prefix, group))
+        else:
+            logger.info("connectivity-check: All %shosts %s reachable" % (prefix, group))
 
 class ConnectivityCheck:
 
@@ -39,7 +79,7 @@ class ConnectivityCheck:
         '''
         self.__input_file = input_file
 
-    def pingHosts(self, host_list, retry_count, retry_interval, ping_count, deadline, timeout, ipv6=False):
+    def pingHosts(self, host_list, retry_count, retry_interval, ping_count, deadline, timeout):
 
         # Prepare list of hosts to ping
         if not isinstance(host_list, list):
@@ -67,17 +107,26 @@ class ConnectivityCheck:
                         pingCmd += "-w " + str(deadline) + " "
                     if timeout is not None:
                         pingCmd += "-W " + str(timeout) + " "
-                    if ipv6:
-                      pingCmd = pingCmd + " -6 "
-                    logger.info('connectivity-check: Pinging host \'%s\'.' % (host))
-                    updateActivity('connectivity-check: Pinging host \'%s\'.' % (host))
+                    version = _hostFamily(host)
+                    if version == 6:
+                        label = 'IPv6 host'
+                        pingCmd += " -6 "
+                    elif version == 4:
+                        label = 'IPv4 host'
+                    else:
+                        label = 'host'
+                    logger.info('connectivity-check: Pinging %s \'%s\'.' % (label, host))
+                    updateActivity('connectivity-check: Pinging %s \'%s\'.' % (label, host))
                     # Ping the host
                     rv = runCommand(pingCmd + host, False)
                     if rv == 0:
                          # Host is alive, remove it from the list
                          _host_list.remove(host)
-                    logger.info('connectivity-check: Host \'%s\' not reachable.' % (host))
-                    updateActivity('connectivity-check: Host \'%s\' not reachable.' % (host))
+                         logger.info('connectivity-check: %s \'%s\' is reachable.' % (label, host))
+                         updateActivity('connectivity-check: %s \'%s\' is reachable.' % (label, host))
+                    else:
+                         logger.info('connectivity-check: %s \'%s\' not reachable.' % (label, host))
+                         updateActivity('connectivity-check: %s \'%s\' not reachable.' % (label, host))
                 else:
                     # Discard invalid hosts
                     _host_list.remove(host)
@@ -127,21 +176,21 @@ class ConnectivityCheck:
             # Time to wait for a response, in seconds
             timeout = getField(section_data, 'timeout', int, None)
 
-            # Ping ipv4 host list
             if section_data.get('ping-hosts') is not None:
-                logger.info('connectivity-check: Attempting to connect to IPv4 hosts %s.' % (section_data.get('ping-hosts')))
-                if self.pingHosts(section_data.get('ping-hosts'), retry_count, retry_interval, ping_count, deadline, timeout) is False:
-                    logger.error('connectivity-check: IPv4 hosts not reachable.')
+                hosts = section_data.get('ping-hosts')
+                _logHostGroups('attempt', hosts)
+                if self.pingHosts(hosts, retry_count, retry_interval, ping_count, deadline, timeout) is False:
+                    logger.error('connectivity-check: Hosts not reachable.')
                     sys.exit(1)
-                logger.info('connectivity-check: All IPv4 hosts %s reachable' %(section_data.get('ping-hosts')))
+                _logHostGroups('reachable', hosts)
 
-            # Ping ipv6 host list
             if section_data.get('ping6-hosts') is not None:
-                logger.info('connectivity-check: Attempting to connect to IPv6 hosts %s.' % (section_data.get('ping6-hosts')))
-                if self.pingHosts(section_data.get('ping6-hosts'), retry_count, retry_interval, ping_count, deadline, timeout, ipv6=True) is False:
-                    logger.error('connectivity-check: IPv6 hosts not reachable.')
+                hosts = section_data.get('ping6-hosts')
+                _logHostGroups('attempt', hosts)
+                if self.pingHosts(hosts, retry_count, retry_interval, ping_count, deadline, timeout) is False:
+                    logger.error('connectivity-check: Hosts not reachable.')
                     sys.exit(1)
-                logger.info('connectivity-check: All IPv6 hosts %s reachable' %(section_data.get('ping6-hosts')))
+                _logHostGroups('reachable', hosts)
 
         except Exception as e:
             logger.error('connectivity-check: Exception[%s] encountered while connecting to hosts.' %(e))
