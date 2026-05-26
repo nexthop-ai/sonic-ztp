@@ -343,15 +343,16 @@ class ZTPJson(ConfigSection):
         '''!
           Split ZTP JSON into individual configuration sections.
 
+          The per-section input.json snapshot must reflect current ztpDict state on every ZTPJson load so plugins read
+          up-to-date data on resume.
+
           @param key (str) Configuration section name
           @param value (object) Configuration section data
         '''
         section_dir = getCfg('ztp-tmp-persistent') + '/' + key
         section_file = section_dir + '/' + getCfg('section-input-file')
         try:
-            if os.path.isdir(section_dir) is False:
-                os.makedirs(section_dir)
-                self.objJson.writeJson(section_file, {key:val}, getCfg('json-indent'))
+            self.objJson.writeJson(section_file, {key:val}, getCfg('json-indent'), create_dirs=True)
         except:
             raise ValueError('Unable to write Configuration Section %s JSON data to file %s' % (key, section_file))
 

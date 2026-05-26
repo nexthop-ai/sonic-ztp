@@ -22,6 +22,7 @@ import shutil
 import json
 import pytest
 
+from ztp import defaults
 from ztp.ZTPLib import getCfg
 from ztp.ZTPSections import ConfigSection,ZTPJson
 from ztp.JsonReader import JsonReader
@@ -1235,3 +1236,55 @@ class TestClass(object):
 
         plugin_name = ztpjson.plugin('test-provisioning-script')
         assert(plugin_name == None)
+
+    def test_ztp_refreshes_session_snapshot_on_load(self, tmpdir, monkeypatch):
+        '''!
+        Verify that refreshes its per-section snapshot on every ZTPJson load, even when the section directory
+        already exists from a prior session.
+        '''
+        sections_dir = tmpdir.mkdir("sections")
+        ztp_json_path = str(tmpdir.join("ztp_data.json"))
+        shadow_path = str(tmpdir.join("ztp_data_shadow.json"))
+        monkeypatch.setitem(defaults.defaultCfg, "ztp-tmp-persistent", str(sections_dir))
+        monkeypatch.setitem(defaults.defaultCfg, "ztp-json", ztp_json_path)
+        monkeypatch.setitem(defaults.defaultCfg, "ztp-json-shadow", shadow_path)
+
+        section_name = "0001-test-section"
+        section_input_file = os.path.join(
+            str(sections_dir), section_name, getCfg("section-input-file")
+        )
+        assert not os.path.isfile(section_input_file)
+
+        def write_ztp_json(install_status):
+            content = {
+                "ztp": {
+                    "status": "IN-PROGRESS",
+                    section_name: {
+                        "plugin": "test-plugin",
+                        "install": {
+                            "url": "http://example.test/firmware",
+                            "status": install_status,
+                        },
+                        "status": "IN-PROGRESS",
+                    },
+                },
+            }
+            with open(ztp_json_path, "w") as f:
+                json.dump(content, f)
+
+        # First load: section_dir doesn't exist yet, ZTP creates it and writes the initial snapshot.
+        write_ztp_json(install_status="IN-PROGRESS")
+        ZTPJson()
+        assert os.path.isfile(section_input_file)
+        with open(section_input_file) as f:
+            initial = json.load(f)
+        assert initial[section_name]["install"]["status"] == "IN-PROGRESS"
+
+        # Simulate a plugin updating ztp_data.json directly (e.g. a progress marker written before a self-reboot).
+        write_ztp_json(install_status="SUCCESS")
+
+        # Second load: section_dir exists, ZTP must still refresh input.json from current ztpDict.
+        ZTPJson()
+        with open(section_input_file) as f:
+            refreshed = json.load(f)
+        assert refreshed[section_name]["install"]["status"] == "SUCCESS"
